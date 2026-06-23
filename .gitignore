@@ -4,3 +4,15 @@ build/
 *.dylib
 .DS_Store
 *.tsbuildinfo
+
+# Rust N-API build artifacts
+native/target/
+
+# Reference codebases (cloned externally; do not commit their .git/.build/build)
+reference/*/.git/
+reference/*/.build/
+reference/*/.spm-build/
+reference/*/build/
+
+# Devin handoff documents
+.agents/handoffs/
