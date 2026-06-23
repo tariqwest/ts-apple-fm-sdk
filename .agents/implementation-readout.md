@@ -10,7 +10,7 @@ Translate the `python-apple-fm-sdk` into a TypeScript SDK, aiming for a near 1-t
 
 | Decision | Selected Option | Rationale |
 |----------|-----------------|-----------|
-| FFI approach | Bun FFI (primary) with a `NativeBindings` abstraction layer for future Node N-API | Direct, low-overhead binding to the existing `foundation-models-c` dylib; abstraction keeps the door open for Node support without changing public API |
+| FFI approach | Rust N-API addon behind a `NativeBindings` abstraction layer | Direct binding to the existing `foundation-models-c` dylib; works under both Bun and Node.js without changing the public API |
 | Generable equivalent | Zod schemas + `guide()` helper | TypeScript-idiomatic, gives strong inference, and matches the `apple-on-device-ai` reference pattern |
 | Test runner | Vitest | Fast, Jest-compatible API, works well with both Bun and Node |
 | Package manager | Bun | Chosen to match the FFI runtime and the `bun:ffi` dependency |
@@ -33,15 +33,14 @@ src/
 ├── type-conversion.ts    # Zod-to-Swift type mapping
 └── ffi/
     ├── types.ts          # C FFI type definitions
-    ├── bindings.ts       # Bun FFI symbol table
-    ├── native.ts         # Runtime-agnostic loader + NativeBindings interface
+    ├── native.ts         # N-API loader + NativeBindings interface
     └── managed-object.ts # Reference counted object wrapper
 ```
 
 ## Implementation Phases (TDD)
 
 1. **Phase 0 — Scaffolding** (`package.json`, `tsconfig.json`, `vitest.config.ts`, `build.sh`, `.gitignore`)
-2. **Phase 1 — Foundation** (`errors.ts`, `ffi/types.ts`, `ffi/bindings.ts`, `ffi/native.ts`, `ffi/managed-object.ts`, `type-conversion.ts`)
+2. **Phase 1 — Foundation** (`errors.ts`, `ffi/types.ts`, `ffi/native.ts`, `ffi/managed-object.ts`, `type-conversion.ts`)
 3. **Phase 2 — Core** (`core.ts`, `generation-options.ts`)
 4. **Phase 3 — Session & Prompt** (`session.ts`, `prompt.ts`)
 5. **Phase 4 — Guided Generation** (`generation-guide.ts`, `generation-schema.ts`, `generable.ts`)
