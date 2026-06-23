@@ -11,32 +11,46 @@ import { ManagedObject } from "./ffi/managed-object.js";
 import { getNativeBindings } from "./ffi/native.js";
 import type { Pointer, FMGeneratedContentRef } from "./ffi/types.js";
 import { GeneratedContent } from "./generable.js";
+import type { GenerationSchema } from "./generation-schema.js";
 import { Tool } from "./tool.js";
-import { statusCodeToError } from "./errors.js";
 
 export class BridgedTool extends ManagedObject {
   private _tool: Tool;
+  private _schema: GenerationSchema;
+  private _pendingCalls = 0;
+  private _releaseRequested = false;
 
   constructor(tool: Tool) {
     const native = getNativeBindings();
     const schema = tool.argumentsSchema;
 
     const callback = (contentPtr: Pointer, callId: number) => {
-      // Ownership of contentPtr is transferred to us. Wrap it and release it
-      // after the async tool call completes.
+      // Ownership of contentPtr is transferred to us. GeneratedContent reads
+      // and releases it during construction.
       const content = new GeneratedContent(undefined, undefined, contentPtr);
+      this._pendingCalls++;
 
       Promise.resolve()
         .then(() => tool.call(content))
         .then((result) => {
-          native.bridgedToolFinishCall(this.ptr, callId, result);
+          if (!this.isReleased) {
+            native.bridgedToolFinishCall(this.ptr, callId, result);
+          }
         })
         .catch((error: Error) => {
-          native.bridgedToolFinishCall(
-            this.ptr,
-            callId,
-            `Tool error: ${error.message}`,
-          );
+          if (!this.isReleased) {
+            native.bridgedToolFinishCall(
+              this.ptr,
+              callId,
+              `Tool error: ${error.message}`,
+            );
+          }
+        })
+        .finally(() => {
+          this._pendingCalls--;
+          if (this._releaseRequested && this._pendingCalls === 0) {
+            this.doRelease();
+          }
         });
     };
 
@@ -49,6 +63,24 @@ export class BridgedTool extends ManagedObject {
 
     super(ptr);
     this._tool = tool;
+    this._schema = schema;
+  }
+
+  /** Release the bridged tool, freeing its callback slot and C pointer. */
+  release(): void {
+    if (this.isReleased) return;
+    if (this._pendingCalls > 0) {
+      this._releaseRequested = true;
+      return;
+    }
+    this.doRelease();
+  }
+
+  private doRelease(): void {
+    if (this.isReleased) return;
+    const native = getNativeBindings();
+    native.bridgedToolDestroy(this.ptr);
+    super.release();
   }
 }
 

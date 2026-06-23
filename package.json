@@ -16,6 +16,7 @@
   "files": [
     "dist",
     "build/*.dylib",
+    "build/apple_fm_sdk_napi.node",
     "README.md",
     "LICENSE"
   ],

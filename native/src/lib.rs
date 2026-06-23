@@ -1009,9 +1009,24 @@ pub fn system_language_model_token_count_for_transcript(
 const MAX_TOOL_CALLBACKS: usize = 64;
 
 static TOOL_CALLBACKS: OnceLock<Mutex<HashMap<usize, StringCallback>>> = OnceLock::new();
+static TOOL_PTR_TO_SLOT: OnceLock<Mutex<HashMap<usize, usize>>> = OnceLock::new();
 
 fn tool_callbacks() -> &'static Mutex<HashMap<usize, StringCallback>> {
     TOOL_CALLBACKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn tool_ptr_to_slot() -> &'static Mutex<HashMap<usize, usize>> {
+    TOOL_PTR_TO_SLOT.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn free_tool_callback_slot(tool: *mut c_void) {
+    let ptr_key = tool as usize;
+    let index = tool_ptr_to_slot().lock().unwrap().remove(&ptr_key);
+    if let Some(index) = index {
+        if let Some(tsfn) = tool_callbacks().lock().unwrap().remove(&index) {
+            let _ = tsfn.abort();
+        }
+    }
 }
 
 fn tool_trampoline_inner(index: usize, content: *mut c_void, call_id: c_uint) {
@@ -1166,7 +1181,17 @@ pub fn bridged_tool_create(
         tool_callbacks().lock().unwrap().remove(&index);
         return Err(napi::Error::from_reason(take_c_string(error_description)));
     }
+    tool_ptr_to_slot()
+        .lock()
+        .unwrap()
+        .insert(tool as usize, index);
     Ok(ptr_to_f64(tool))
+}
+
+#[napi]
+pub fn bridged_tool_destroy(tool: f64) -> napi::Result<()> {
+    free_tool_callback_slot(f64_to_ptr(tool));
+    Ok(())
 }
 
 #[napi]

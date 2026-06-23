@@ -8,10 +8,12 @@
 
 import { resolve, dirname } from "node:path";
 import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import type { Pointer } from "./types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 
 const NODE_ADDON_SEARCH_PATHS = [
   resolve(__dirname, "../../build/apple_fm_sdk_napi.node"),
@@ -24,7 +26,7 @@ function findNodeAddon(): string {
   }
   throw new Error(
     `Could not find apple_fm_sdk_napi.node. Searched:\n${NODE_ADDON_SEARCH_PATHS.map((p) => `  - ${p}`).join("\n")}\n` +
-      `Run 'bun run build:native' or './build.sh' to compile.`,
+      `Run 'bun run build:all' to compile the Foundation Models dylib and N-API addon.`,
   );
 }
 
@@ -197,6 +199,7 @@ export interface NativeBindings {
     callback: ToolCallCallback,
   ): Pointer;
   bridgedToolFinishCall(tool: Pointer, callId: number, output: string): void;
+  bridgedToolDestroy(tool: Pointer): void;
   setActiveToolCallback(callback: ToolCallCallback): void;
 
   // --- Memory management ---
@@ -389,6 +392,7 @@ export function getNativeBindings(): NativeBindings {
         callback(asPtr(event.contentPtr), event.callId);
       })),
     bridgedToolFinishCall: (tool, callId, output) => addon.bridgedToolFinishCall(tool, callId, output),
+    bridgedToolDestroy: (tool) => addon.bridgedToolDestroy(tool),
     setActiveToolCallback: (callback) => addon.setActiveToolCallback((json: string) => {
       const event = JSON.parse(json);
       callback(asPtr(event.contentPtr), event.callId);

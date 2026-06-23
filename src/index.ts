@@ -117,3 +117,96 @@ export {
 // --- FFI (advanced usage) ---
 export { getNativeBindings } from "./ffi/native.js";
 export { ManagedObject } from "./ffi/managed-object.js";
+
+// --- Default export (Python-style namespace) ---
+import {
+  SystemLanguageModel,
+  SystemLanguageModelUseCase,
+  SystemLanguageModelGuardrails,
+  SystemLanguageModelUnavailableReason,
+} from "./core.js";
+import { LanguageModelSession } from "./session.js";
+import {
+  Attachment,
+  ImageAttachment,
+  composePrompt,
+  PromptError,
+  ImagePromptError,
+} from "./prompt.js";
+import { Transcript } from "./transcript.js";
+import { generable, GeneratedContent, GenerationID } from "./generable.js";
+import { GenerationSchema } from "./generation-schema.js";
+import { guide, hasGuideMeta, getGuideMeta, GuideType, GUIDE_META } from "./generation-guide.js";
+import { GenerationOptions, SamplingMode, SamplingModeType } from "./generation-options.js";
+import { Tool } from "./tool.js";
+import {
+  FoundationModelsError,
+  GenerationError,
+  InvalidGenerationSchemaError,
+  ExceededContextWindowSizeError,
+  AssetsUnavailableError,
+  GuardrailViolationError,
+  UnsupportedGuideError,
+  UnsupportedLanguageOrLocaleError,
+  DecodingFailureError,
+  RateLimitedError,
+  ConcurrentRequestsError,
+  RefusalError,
+  ToolCallError,
+  GenerationErrorCode,
+  statusCodeToError,
+} from "./errors.js";
+import {
+  zodTypeToSwiftString,
+  isZodOptional,
+  isZodArray,
+  unwrapZodType,
+} from "./type-conversion.js";
+
+const fm = {
+  SystemLanguageModel,
+  SystemLanguageModelUseCase,
+  SystemLanguageModelGuardrails,
+  SystemLanguageModelUnavailableReason,
+  LanguageModelSession,
+  Attachment,
+  ImageAttachment,
+  composePrompt,
+  PromptError,
+  ImagePromptError,
+  Transcript,
+  generable,
+  GeneratedContent,
+  GenerationID,
+  GenerationSchema,
+  guide,
+  hasGuideMeta,
+  getGuideMeta,
+  GuideType,
+  GUIDE_META,
+  GenerationOptions,
+  SamplingMode,
+  SamplingModeType,
+  Tool,
+  FoundationModelsError,
+  GenerationError,
+  InvalidGenerationSchemaError,
+  ExceededContextWindowSizeError,
+  AssetsUnavailableError,
+  GuardrailViolationError,
+  UnsupportedGuideError,
+  UnsupportedLanguageOrLocaleError,
+  DecodingFailureError,
+  RateLimitedError,
+  ConcurrentRequestsError,
+  RefusalError,
+  ToolCallError,
+  GenerationErrorCode,
+  statusCodeToError,
+  zodTypeToSwiftString,
+  isZodOptional,
+  isZodArray,
+  unwrapZodType,
+};
+
+export default fm;

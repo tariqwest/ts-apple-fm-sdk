@@ -6,14 +6,17 @@ describe.skipIf(!process.env.FM_NATIVE)("Streaming responses (native)", () => {
     const { LanguageModelSession } = await import("../src/session.js");
     const session = new LanguageModelSession();
 
-    const chunks: string[] = [];
-    for await (const chunk of session.streamResponse("Tell me a short story about a cat")) {
-      chunks.push(chunk);
+    const deltas: string[] = [];
+    let previous = "";
+    for await (const snapshot of session.streamResponse("Tell me a short story about a cat")) {
+      const delta = snapshot.slice(previous.length);
+      deltas.push(delta);
+      previous = snapshot;
     }
 
-    expect(chunks.length).toBeGreaterThan(0);
-    const fullResponse = chunks.join("");
-    expect(fullResponse.length).toBeGreaterThan(10);
+    expect(deltas.length).toBeGreaterThan(0);
+    expect(previous.length).toBeGreaterThan(10);
+    expect(deltas.join("")).toBe(previous);
   });
 
   it("streamResponse maintains session context", async () => {
@@ -21,20 +24,20 @@ describe.skipIf(!process.env.FM_NATIVE)("Streaming responses (native)", () => {
     const session = new LanguageModelSession();
 
     // First stream
-    const chunks1: string[] = [];
-    for await (const chunk of session.streamResponse(
+    let previous1 = "";
+    for await (const snapshot of session.streamResponse(
       "What are differences between Swift and Python?",
     )) {
-      chunks1.push(chunk);
+      previous1 = snapshot;
     }
-    expect(chunks1.length).toBeGreaterThan(0);
+    expect(previous1.length).toBeGreaterThan(0);
 
     // Follow-up stream with context
-    const chunks2: string[] = [];
-    for await (const chunk of session.streamResponse("Show me an example")) {
-      chunks2.push(chunk);
+    let previous2 = "";
+    for await (const snapshot of session.streamResponse("Show me an example")) {
+      previous2 = snapshot;
     }
-    expect(chunks2.length).toBeGreaterThan(0);
+    expect(previous2.length).toBeGreaterThan(0);
   });
 
   it("streamResponse with GenerationOptions", async () => {
@@ -44,8 +47,9 @@ describe.skipIf(!process.env.FM_NATIVE)("Streaming responses (native)", () => {
     );
     const session = new LanguageModelSession();
 
-    const chunks: string[] = [];
-    for await (const chunk of session.streamResponse(
+    const deltas: string[] = [];
+    let previous = "";
+    for await (const snapshot of session.streamResponse(
       "Say hello in three words.",
       new GenerationOptions({
         temperature: 0.3,
@@ -53,11 +57,13 @@ describe.skipIf(!process.env.FM_NATIVE)("Streaming responses (native)", () => {
         maximumResponseTokens: 50,
       }),
     )) {
-      chunks.push(chunk);
+      const delta = snapshot.slice(previous.length);
+      deltas.push(delta);
+      previous = snapshot;
     }
 
-    expect(chunks.length).toBeGreaterThan(0);
-    const fullResponse = chunks.join("");
-    expect(fullResponse.length).toBeGreaterThan(0);
+    expect(deltas.length).toBeGreaterThan(0);
+    expect(previous.length).toBeGreaterThan(0);
+    expect(deltas.join("")).toBe(previous);
   });
 });
