@@ -1,9 +1,9 @@
 /**
  * Runtime-agnostic abstraction over the native FFI layer.
  *
- * Primary implementation uses Bun FFI (`bun:ffi`). The abstraction
- * allows swapping in a Node N-API adapter without changing any
- * consuming code.
+ * Primary implementation uses a Node-API (N-API) native Rust module that wraps
+ * the Foundation Models C bindings. The Rust module marshals C callbacks to the
+ * JavaScript thread so the SDK works in both Bun and Node.js.
  */
 
 import { resolve, dirname } from "node:path";
@@ -11,297 +11,394 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Pointer } from "./types.js";
 
-// ---------- Library loading ----------
-
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-/** Candidate paths for the compiled dylib, in priority order. */
-const DYLIB_SEARCH_PATHS = [
-  resolve(__dirname, "../../build/libFoundationModels.dylib"),
-  resolve(__dirname, "../build/libFoundationModels.dylib"),
-  resolve(
-    __dirname,
-    "../../reference/python-apple-fm-sdk/foundation-models-c/.build/release/libFoundationModels.dylib",
-  ),
+const NODE_ADDON_SEARCH_PATHS = [
+  resolve(__dirname, "../../build/apple_fm_sdk_napi.node"),
+  resolve(__dirname, "../build/apple_fm_sdk_napi.node"),
 ];
 
-function findDylib(): string {
-  for (const p of DYLIB_SEARCH_PATHS) {
+function findNodeAddon(): string {
+  for (const p of NODE_ADDON_SEARCH_PATHS) {
     if (existsSync(p)) return p;
   }
   throw new Error(
-    `Could not find libFoundationModels.dylib. Searched:\n${DYLIB_SEARCH_PATHS.map((p) => `  - ${p}`).join("\n")}\n` +
+    `Could not find apple_fm_sdk_napi.node. Searched:\n${NODE_ADDON_SEARCH_PATHS.map((p) => `  - ${p}`).join("\n")}\n` +
       `Run 'bun run build:native' or './build.sh' to compile.`,
   );
 }
 
-// ---------- Native module interface ----------
+function asPtr(value: bigint | number): Pointer {
+  return Number(value) as Pointer;
+}
 
-/**
- * Thin wrapper over the loaded FFI symbols.
- *
- * All methods correspond 1-to-1 with the C functions in FoundationModels.h.
- * Pointer types are `number` (Bun FFI convention). Strings are encoded/decoded
- * automatically where indicated.
- */
+/** JS-friendly callback event types. */
+export type ResponseCallback = (status: number, text: string | null) => void;
+export type StructuredResponseCallback = (status: number, contentPtr: Pointer | null) => void;
+export type TokenCountCallback = (status: number, count: number, errorDescription?: string) => void;
+export type ToolCallCallback = (contentPtr: Pointer, callId: number) => void;
+
 export interface NativeBindings {
   // --- SystemLanguageModel ---
-  FMSystemLanguageModelGetDefault(): Pointer;
-  FMSystemLanguageModelCreate(useCase: number, guardrails: number): Pointer;
-  FMSystemLanguageModelIsAvailable(
-    ref: Pointer,
-    outReason: Pointer,
-  ): boolean;
-  FMSystemLanguageModelGetContextSize(model: Pointer): number;
+  systemLanguageModelGetDefault(): Pointer;
+  systemLanguageModelCreate(useCase: number, guardrails: number): Pointer;
+  systemLanguageModelIsAvailable(model: Pointer): { available: boolean; reason?: number };
+  systemLanguageModelGetContextSize(model: Pointer): number;
 
   // --- Session ---
-  FMLanguageModelSessionCreateDefault(): Pointer;
-  FMLanguageModelSessionCreateFromSystemLanguageModel(
+  languageModelSessionCreateDefault(): Pointer;
+  languageModelSessionCreateFromSystemLanguageModel(
     model: Pointer | null,
-    instructions: Pointer | null,
-    tools: Pointer | null,
-    toolCount: number,
+    instructions: string | null,
+    tools: Pointer[],
   ): Pointer;
-  FMLanguageModelSessionCreateFromTranscript(
-    transcriptSession: Pointer,
+  languageModelSessionCreateFromTranscript(
+    transcript: Pointer,
     model: Pointer | null,
-    tools: Pointer | null,
-    toolCount: number,
+    tools: Pointer[],
   ): Pointer;
-  FMLanguageModelSessionIsResponding(session: Pointer): boolean;
-  FMLanguageModelSessionReset(session: Pointer): void;
+  languageModelSessionIsResponding(session: Pointer): boolean;
+  languageModelSessionReset(session: Pointer): void;
 
   // --- Composed prompt ---
-  FMComposedPromptInitialize(): Pointer;
-  FMComposedPromptAddText(composedPrompt: Pointer, text: Pointer): void;
-  FMComposedPromptAddAttachment(
-    composedPrompt: Pointer,
-    imagePath: Pointer,
-    label: Pointer | null,
-    outError: Pointer | null,
+  composedPromptInitialize(): Pointer;
+  composedPromptAddText(prompt: Pointer, text: string): void;
+  composedPromptAddAttachment(
+    prompt: Pointer,
+    imagePath: string,
+    label: string | null,
   ): boolean;
 
   // --- Response ---
-  FMLanguageModelSessionRespond(
+  languageModelSessionRespond(
     session: Pointer,
-    composedPrompt: Pointer,
-    optionsJSON: Pointer | null,
-    userInfo: Pointer | null,
-    callback: Pointer,
+    prompt: Pointer,
+    optionsJSON: string | null,
+    callback: ResponseCallback,
   ): Pointer;
-  FMLanguageModelSessionStreamResponse(
+  languageModelSessionStreamResponse(
     session: Pointer,
-    composedPrompt: Pointer,
-    optionsJSON: Pointer | null,
+    prompt: Pointer,
+    optionsJSON: string | null,
   ): Pointer;
-  FMLanguageModelSessionResponseStreamIterate(
+  languageModelSessionResponseStreamIterate(
     stream: Pointer,
-    userInfo: Pointer | null,
-    callback: Pointer,
+    callback: ResponseCallback,
   ): void;
 
   // --- Structured response ---
-  FMLanguageModelSessionRespondWithSchema(
+  languageModelSessionRespondWithSchema(
     session: Pointer,
-    composedPrompt: Pointer,
+    prompt: Pointer,
     schema: Pointer,
-    optionsJSON: Pointer | null,
-    userInfo: Pointer | null,
-    callback: Pointer,
+    optionsJSON: string | null,
+    callback: StructuredResponseCallback,
   ): Pointer;
-  FMLanguageModelSessionRespondWithSchemaFromJSON(
+  languageModelSessionRespondWithSchemaFromJSON(
     session: Pointer,
-    composedPrompt: Pointer,
-    schemaJSONString: Pointer,
-    optionsJSON: Pointer | null,
-    userInfo: Pointer | null,
-    callback: Pointer,
+    prompt: Pointer,
+    schemaJSON: string,
+    optionsJSON: string | null,
+    callback: StructuredResponseCallback,
   ): Pointer;
 
   // --- Token counting ---
-  FMSystemLanguageModelTokenCountForPrompt(
+  systemLanguageModelTokenCountForPrompt(
     model: Pointer,
-    composedPrompt: Pointer,
-    userInfo: Pointer | null,
-    callback: Pointer,
+    prompt: Pointer,
+    callback: TokenCountCallback,
   ): Pointer;
-  FMSystemLanguageModelTokenCountForInstructions(
+  systemLanguageModelTokenCountForInstructions(
     model: Pointer,
-    instructions: Pointer,
-    userInfo: Pointer | null,
-    callback: Pointer,
+    instructions: string,
+    callback: TokenCountCallback,
   ): Pointer;
-  FMSystemLanguageModelTokenCountForTools(
+  systemLanguageModelTokenCountForTools(
     model: Pointer,
-    tools: Pointer | null,
-    toolCount: number,
-    userInfo: Pointer | null,
-    callback: Pointer,
+    tools: Pointer[],
+    callback: TokenCountCallback,
   ): Pointer;
-  FMSystemLanguageModelTokenCountForSchema(
+  systemLanguageModelTokenCountForSchema(
     model: Pointer,
     schema: Pointer,
-    userInfo: Pointer | null,
-    callback: Pointer,
+    callback: TokenCountCallback,
   ): Pointer;
-  FMSystemLanguageModelTokenCountForTranscript(
+  systemLanguageModelTokenCountForTranscript(
     model: Pointer,
-    transcriptSession: Pointer,
-    userInfo: Pointer | null,
-    callback: Pointer,
+    transcript: Pointer,
+    callback: TokenCountCallback,
   ): Pointer;
 
   // --- Transcript ---
-  FMTranscriptCreateFromJSONString(
-    jsonString: Pointer,
-    outErrorCode: Pointer | null,
-    outErrorDescription: Pointer | null,
-  ): Pointer | null;
-  FMLanguageModelSessionGetTranscriptJSONString(
-    session: Pointer,
-    outErrorCode: Pointer | null,
-    outErrorDescription: Pointer | null,
-  ): Pointer | null;
+  transcriptCreateFromJSONString(json: string): Pointer;
+  languageModelSessionGetTranscriptJSONString(session: Pointer): string;
 
   // --- GenerationSchema ---
-  FMGenerationSchemaCreate(name: Pointer, description: Pointer | null): Pointer;
-  FMGenerationSchemaPropertyCreate(
-    name: Pointer,
-    description: Pointer | null,
-    typeName: Pointer,
+  generationSchemaCreate(name: string, description: string | null): Pointer;
+  generationSchemaPropertyCreate(
+    name: string,
+    description: string | null,
+    typeName: string,
     isOptional: boolean,
   ): Pointer;
-  FMGenerationSchemaPropertyAddAnyOfGuide(
+  generationSchemaPropertyAddRangeGuide(
     property: Pointer,
-    anyOf: Pointer,
-    choiceCount: number,
+    min: number,
+    max: number,
     wrapped: boolean,
   ): void;
-  FMGenerationSchemaPropertyAddCountGuide(
-    property: Pointer,
-    count: number,
-    wrapped: boolean,
-  ): void;
-  FMGenerationSchemaPropertyAddMaximumGuide(
-    property: Pointer,
-    maximum: number,
-    wrapped: boolean,
-  ): void;
-  FMGenerationSchemaPropertyAddMinimumGuide(
+  generationSchemaPropertyAddMinimumGuide(
     property: Pointer,
     minimum: number,
     wrapped: boolean,
   ): void;
-  FMGenerationSchemaPropertyAddMinItemsGuide(
+  generationSchemaPropertyAddMaximumGuide(
+    property: Pointer,
+    maximum: number,
+    wrapped: boolean,
+  ): void;
+  generationSchemaPropertyAddCountGuide(
+    property: Pointer,
+    count: number,
+    wrapped: boolean,
+  ): void;
+  generationSchemaPropertyAddMinItemsGuide(
     property: Pointer,
     minItems: number,
   ): void;
-  FMGenerationSchemaPropertyAddMaxItemsGuide(
+  generationSchemaPropertyAddMaxItemsGuide(
     property: Pointer,
     maxItems: number,
   ): void;
-  FMGenerationSchemaPropertyAddRangeGuide(
+  generationSchemaPropertyAddRegex(
     property: Pointer,
-    minValue: number,
-    maxValue: number,
+    pattern: string,
     wrapped: boolean,
   ): void;
-  FMGenerationSchemaPropertyAddRegex(
+  generationSchemaPropertyAddAnyOfGuide(
     property: Pointer,
-    pattern: Pointer,
+    values: string[],
     wrapped: boolean,
   ): void;
-  FMGenerationSchemaAddProperty(schema: Pointer, property: Pointer): void;
-  FMGenerationSchemaAddReferenceSchema(
-    schema: Pointer,
-    referenceSchema: Pointer,
-  ): void;
-  FMGenerationSchemaGetJSONString(
-    schema: Pointer,
-    outErrorCode: Pointer | null,
-    outErrorDescription: Pointer | null,
-  ): Pointer | null;
+  generationSchemaAddProperty(schema: Pointer, property: Pointer): void;
+  generationSchemaAddReferenceSchema(schema: Pointer, referenceSchema: Pointer): void;
+  generationSchemaGetJSONString(schema: Pointer): string;
 
   // --- GeneratedContent ---
-  FMGeneratedContentCreateFromJSON(
-    jsonString: Pointer,
-    outErrorCode: Pointer | null,
-    outErrorDescription: Pointer | null,
-  ): Pointer | null;
-  FMGeneratedContentGetJSONString(content: Pointer): Pointer | null;
-  FMGeneratedContentGetPropertyValue(
-    content: Pointer,
-    propertyName: Pointer,
-    outErrorCode: Pointer | null,
-    outErrorDescription: Pointer | null,
-  ): Pointer | null;
-  FMGeneratedContentIsComplete(content: Pointer): boolean;
+  generatedContentCreateFromJSON(json: string): Pointer;
+  generatedContentGetJSONString(content: Pointer): string;
+  generatedContentIsComplete(content: Pointer): boolean;
 
   // --- Tools ---
-  FMBridgedToolCreate(
-    name: Pointer,
-    description: Pointer,
+  bridgedToolCreate(
+    name: string,
+    description: string,
     parameters: Pointer,
-    callable: Pointer,
-    outErrorCode: Pointer | null,
-    outErrorDescription: Pointer | null,
-  ): Pointer | null;
-  FMBridgedToolFinishCall(
-    tool: Pointer,
-    callId: number,
-    output: Pointer,
-  ): void;
+    callback: ToolCallCallback,
+  ): Pointer;
+  bridgedToolFinishCall(tool: Pointer, callId: number, output: string): void;
+  setActiveToolCallback(callback: ToolCallCallback): void;
 
   // --- Memory management ---
-  FMTaskCancel(task: Pointer): void;
-  FMRetain(object: Pointer): void;
-  FMRelease(object: Pointer): void;
-  FMFreeString(str: Pointer): void;
+  fmRetain(ptr: Pointer): void;
+  fmRelease(ptr: Pointer): void;
+  fmFreeString(ptr: Pointer): void;
+  fmTaskCancel(ptr: Pointer): void;
 }
-
-// ---------- Bun FFI loader ----------
 
 let _native: NativeBindings | null = null;
 
-/**
- * Lazily load and return the native bindings.
- *
- * On first call, locates the dylib via `findDylib()` and opens it
- * using Bun's `dlopen`. Subsequent calls return the cached instance.
- */
 export function getNativeBindings(): NativeBindings {
   if (_native) return _native;
 
-  // Dynamic import check – fail fast if not running under Bun
-  const isBun = typeof (globalThis as any).Bun !== "undefined";
-  if (!isBun) {
-    throw new Error(
-      "apple-fm-sdk currently requires Bun for FFI support. " +
-        "Node.js N-API support is planned.",
-    );
-  }
+  const addon = require(findNodeAddon()) as any;
 
-  const dylibPath = findDylib();
+  _native = {
+    systemLanguageModelGetDefault: () => asPtr(addon.systemLanguageModelGetDefault()),
+    systemLanguageModelCreate: (useCase, guardrails) => asPtr(addon.systemLanguageModelCreate(useCase, guardrails)),
+    systemLanguageModelIsAvailable: (model) => addon.systemLanguageModelIsAvailable(model),
+    systemLanguageModelGetContextSize: (model) => addon.systemLanguageModelGetContextSize(model),
 
-  // Use Bun's dlopen
-  const { dlopen } = require("bun:ffi") as typeof import("bun:ffi");
-  const { FFI_SYMBOLS } = require("./bindings.js") as typeof import("./bindings.js");
+    languageModelSessionCreateDefault: () => asPtr(addon.languageModelSessionCreateDefault()),
+    languageModelSessionCreateFromSystemLanguageModel: (model, instructions, tools) =>
+      asPtr(addon.languageModelSessionCreateFromSystemLanguageModel(model, instructions, tools)),
+    languageModelSessionCreateFromTranscript: (transcript, model, tools) =>
+      asPtr(addon.languageModelSessionCreateFromTranscript(transcript, model, tools)),
+    languageModelSessionIsResponding: (session) => addon.languageModelSessionIsResponding(session),
+    languageModelSessionReset: (session) => addon.languageModelSessionReset(session),
 
-  const lib = dlopen(dylibPath, FFI_SYMBOLS as any);
+    composedPromptInitialize: () => asPtr(addon.composedPromptInitialize()),
+    composedPromptAddText: (prompt, text) => addon.composedPromptAddText(prompt, text),
+    composedPromptAddAttachment: (prompt, imagePath, label) =>
+      addon.composedPromptAddAttachment(prompt, imagePath, label),
 
-  // Expose the raw symbols as our NativeBindings interface
-  _native = lib.symbols as unknown as NativeBindings;
+    languageModelSessionRespond: (session, prompt, optionsJSON, callback) => {
+      const nativeCallback = (json: string) => {
+        if (!json) {
+          callback(0, null);
+          return;
+        }
+        const event = JSON.parse(json);
+        if (event.type === "content") {
+          callback(0, event.payload.text);
+        } else if (event.type === "done") {
+          callback(0, null);
+        } else if (event.type === "error") {
+          callback(event.payload.status, null);
+        }
+      };
+      return asPtr(addon.languageModelSessionRespond(session, prompt, optionsJSON, nativeCallback));
+    },
+
+    languageModelSessionStreamResponse: (session, prompt, optionsJSON) =>
+      asPtr(addon.languageModelSessionStreamResponse(session, prompt, optionsJSON)),
+
+    languageModelSessionResponseStreamIterate: (stream, callback) => {
+      const nativeCallback = (json: string) => {
+        const event = JSON.parse(json);
+        if (event.type === "content") {
+          callback(0, event.payload.text);
+        } else if (event.type === "done") {
+          callback(0, null);
+        } else if (event.type === "error") {
+          callback(event.payload.status, null);
+        }
+      };
+      addon.languageModelSessionResponseStreamIterate(stream, nativeCallback);
+    },
+
+    languageModelSessionRespondWithSchema: (session, prompt, schema, optionsJSON, callback) => {
+      const nativeCallback = (json: string) => {
+        const event = JSON.parse(json);
+        if (event.type === "content") {
+          callback(0, asPtr(event.payload.contentPtr));
+        } else if (event.type === "error") {
+          callback(event.payload.status, null);
+        }
+      };
+      return asPtr(addon.languageModelSessionRespondWithSchema(session, prompt, schema, optionsJSON, nativeCallback));
+    },
+
+    languageModelSessionRespondWithSchemaFromJSON: (session, prompt, schemaJSON, optionsJSON, callback) => {
+      const nativeCallback = (json: string) => {
+        const event = JSON.parse(json);
+        if (event.type === "content") {
+          callback(0, asPtr(event.payload.contentPtr));
+        } else if (event.type === "error") {
+          callback(event.payload.status, null);
+        }
+      };
+      return asPtr(addon.languageModelSessionRespondWithSchemaFromJson(session, prompt, schemaJSON, optionsJSON, nativeCallback));
+    },
+
+    systemLanguageModelTokenCountForPrompt: (model, prompt, callback) => {
+      const nativeCallback = (json: string) => {
+        const event = JSON.parse(json);
+        if (event.type === "count") {
+          callback(0, event.payload.count);
+        } else if (event.type === "error") {
+          callback(event.payload.status, 0, event.payload.description);
+        }
+      };
+      return asPtr(addon.systemLanguageModelTokenCountForPrompt(model, prompt, nativeCallback));
+    },
+
+    systemLanguageModelTokenCountForInstructions: (model, instructions, callback) => {
+      const nativeCallback = (json: string) => {
+        const event = JSON.parse(json);
+        if (event.type === "count") {
+          callback(0, event.payload.count);
+        } else if (event.type === "error") {
+          callback(event.payload.status, 0, event.payload.description);
+        }
+      };
+      return asPtr(addon.systemLanguageModelTokenCountForInstructions(model, instructions, nativeCallback));
+    },
+
+    systemLanguageModelTokenCountForTools: (model, tools, callback) => {
+      const nativeCallback = (json: string) => {
+        const event = JSON.parse(json);
+        if (event.type === "count") {
+          callback(0, event.payload.count);
+        } else if (event.type === "error") {
+          callback(event.payload.status, 0, event.payload.description);
+        }
+      };
+      return asPtr(addon.systemLanguageModelTokenCountForTools(model, tools, nativeCallback));
+    },
+
+    systemLanguageModelTokenCountForSchema: (model, schema, callback) => {
+      const nativeCallback = (json: string) => {
+        const event = JSON.parse(json);
+        if (event.type === "count") {
+          callback(0, event.payload.count);
+        } else if (event.type === "error") {
+          callback(event.payload.status, 0, event.payload.description);
+        }
+      };
+      return asPtr(addon.systemLanguageModelTokenCountForSchema(model, schema, nativeCallback));
+    },
+
+    systemLanguageModelTokenCountForTranscript: (model, transcript, callback) => {
+      const nativeCallback = (json: string) => {
+        const event = JSON.parse(json);
+        if (event.type === "count") {
+          callback(0, event.payload.count);
+        } else if (event.type === "error") {
+          callback(event.payload.status, 0, event.payload.description);
+        }
+      };
+      return asPtr(addon.systemLanguageModelTokenCountForTranscript(model, transcript, nativeCallback));
+    },
+
+    transcriptCreateFromJSONString: (json) => asPtr(addon.transcriptCreateFromJsonString(json)),
+    languageModelSessionGetTranscriptJSONString: (session) =>
+      addon.languageModelSessionGetTranscriptJsonString(session),
+
+    generationSchemaCreate: (name, description) => asPtr(addon.generationSchemaCreate(name, description)),
+    generationSchemaPropertyCreate: (name, description, typeName, isOptional) =>
+      asPtr(addon.generationSchemaPropertyCreate(name, description, typeName, isOptional)),
+    generationSchemaPropertyAddRangeGuide: (property, min, max, wrapped) =>
+      addon.generationSchemaPropertyAddRangeGuide(property, min, max, wrapped),
+    generationSchemaPropertyAddMinimumGuide: (property, minimum, wrapped) =>
+      addon.generationSchemaPropertyAddMinimumGuide(property, minimum, wrapped),
+    generationSchemaPropertyAddMaximumGuide: (property, maximum, wrapped) =>
+      addon.generationSchemaPropertyAddMaximumGuide(property, maximum, wrapped),
+    generationSchemaPropertyAddCountGuide: (property, count, wrapped) =>
+      addon.generationSchemaPropertyAddCountGuide(property, count, wrapped),
+    generationSchemaPropertyAddMinItemsGuide: (property, minItems) =>
+      addon.generationSchemaPropertyAddMinItemsGuide(property, minItems),
+    generationSchemaPropertyAddMaxItemsGuide: (property, maxItems) =>
+      addon.generationSchemaPropertyAddMaxItemsGuide(property, maxItems),
+    generationSchemaPropertyAddRegex: (property, pattern, wrapped) =>
+      addon.generationSchemaPropertyAddRegex(property, pattern, wrapped),
+    generationSchemaPropertyAddAnyOfGuide: (property, values, wrapped) =>
+      addon.generationSchemaPropertyAddAnyOfGuide(property, values, wrapped),
+    generationSchemaAddProperty: (schema, property) => addon.generationSchemaAddProperty(schema, property),
+    generationSchemaAddReferenceSchema: (schema, referenceSchema) =>
+      addon.generationSchemaAddReferenceSchema(schema, referenceSchema),
+    generationSchemaGetJSONString: (schema) => addon.generationSchemaGetJsonString(schema),
+
+    generatedContentCreateFromJSON: (json) => asPtr(addon.generatedContentCreateFromJson(json)),
+    generatedContentGetJSONString: (content) => addon.generatedContentGetJsonString(content),
+    generatedContentIsComplete: (content) => addon.generatedContentIsComplete(content),
+
+    bridgedToolCreate: (name, description, parameters, callback) =>
+      asPtr(addon.bridgedToolCreate(name, description, parameters, (json: string) => {
+        const event = JSON.parse(json);
+        callback(asPtr(event.contentPtr), event.callId);
+      })),
+    bridgedToolFinishCall: (tool, callId, output) => addon.bridgedToolFinishCall(tool, callId, output),
+    setActiveToolCallback: (callback) => addon.setActiveToolCallback((json: string) => {
+      const event = JSON.parse(json);
+      callback(asPtr(event.contentPtr), event.callId);
+    }),
+
+    fmRetain: (ptr) => addon.fmRetain(ptr),
+    fmRelease: (ptr) => addon.fmRelease(ptr),
+    fmFreeString: (ptr) => addon.fmFreeString(ptr),
+    fmTaskCancel: (ptr) => addon.fmTaskCancel(ptr),
+  };
+
   return _native;
-}
-
-/**
- * Check whether native bindings are available without throwing.
- */
-export function isNativeAvailable(): boolean {
-  try {
-    getNativeBindings();
-    return true;
-  } catch {
-    return false;
-  }
 }

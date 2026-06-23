@@ -22,7 +22,8 @@
   "scripts": {
     "build": "tsc",
     "build:native": "./build.sh",
-    "build:all": "bun run build:native && bun run build",
+    "build:napi": "cd native && cargo build --release && cp target/release/libapple_fm_sdk_napi.dylib ../build/apple_fm_sdk_napi.node",
+    "build:all": "bun run build:native && bun run build:napi && bun run build",
     "check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
