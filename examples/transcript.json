@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "type": "FoundationModels.Transcript",
+  "transcript": {
+    "entries": [
+      {
+        "id": "entry-1",
+        "role": "instructions",
+        "contents": [
+          {
+            "id": "content-1",
+            "type": "text",
+            "text": "You are a helpful assistant."
+          }
+        ]
+      },
+      {
+        "id": "entry-2",
+        "role": "user",
+        "contents": [
+          {
+            "id": "content-2",
+            "type": "text",
+            "text": "What is the capital of France?"
+          }
+        ]
+      },
+      {
+        "id": "entry-3",
+        "role": "response",
+        "contents": [
+          {
+            "id": "content-3",
+            "type": "text",
+            "text": "The capital of France is Paris."
+          }
+        ]
+      },
+      {
+        "id": "entry-4",
+        "role": "user",
+        "contents": [
+          {
+            "id": "content-4",
+            "type": "text",
+            "text": "What is its population?"
+          }
+        ]
+      },
+      {
+        "id": "entry-5",
+        "role": "response",
+        "contents": [
+          {
+            "id": "content-5",
+            "type": "text",
+            "text": "The population of Paris is approximately 2.1 million."
+          }
+        ]
+      }
+    ]
+  }
+}
