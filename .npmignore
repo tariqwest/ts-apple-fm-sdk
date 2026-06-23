@@ -1,0 +1,22 @@
+# Source and development files (dist/ and build/ are included via package.json "files")
+src/
+tests/
+examples/
+scripts/
+native/
+reference/
+.agents/
+.devin/
+
+# Config and tooling
+tsconfig.json
+vitest.config.ts
+build.sh
+bun.lock
+.gitignore
+AGENTS.md
+
+# Git and IDE
+.git/
+.DS_Store
+*.tsbuildinfo

@@ -6,6 +6,7 @@
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -15,16 +16,19 @@
   },
   "files": [
     "dist",
-    "build/*.dylib",
     "build/apple_fm_sdk_napi.node",
+    "build/libFoundationModels.dylib",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "rm -rf dist && tsc",
     "build:native": "./build.sh",
     "build:napi": "cd native && cargo build --release && cp target/release/libapple_fm_sdk_napi.dylib ../build/apple_fm_sdk_napi.node",
     "build:all": "bun run build:native && bun run build:napi && bun run build",
+    "build:release": "bun run build:all && bun run check && node scripts/verify-package.mjs",
+    "prepack": "bun run build:release",
+    "pack:check": "npm pack --dry-run",
     "check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -43,9 +47,22 @@
     "ffi",
     "typescript"
   ],
+  "author": "Tariq West",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tariqwest/ts-apple-fm-sdk.git"
+  },
+  "homepage": "https://github.com/tariqwest/ts-apple-fm-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/tariqwest/ts-apple-fm-sdk/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=18.0.0",
+    "bun": ">=1.0.0"
   },
   "os": [
     "darwin"
@@ -54,8 +71,7 @@
     "arm64"
   ],
   "dependencies": {
-    "zod": "^3.25.67",
-    "zod-to-json-schema": "^3.24.5"
+    "zod": "^3.25.67"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",

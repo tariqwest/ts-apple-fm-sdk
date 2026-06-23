@@ -11,9 +11,22 @@ bun install                # Install dependencies
 bun run build:native       # Build the Swift dylib (macOS 26+ required)
 bun run build              # Compile TypeScript
 bun run build:all          # Build native + TypeScript
+bun run build:release      # Full release build + package verification
 bun run check              # Type check (tsc --noEmit)
 bun run test               # Run all tests via Vitest
 FM_NATIVE=1 bun run test   # Run all tests including native FFI integration tests
+npm pack                   # Create release tarball (runs prepack → build:release)
+```
+
+### npm Publishing
+
+The published tarball ships prebuilt `build/libFoundationModels.dylib` and `build/apple_fm_sdk_napi.node` for macOS arm64. Publishing must happen on a macOS 26+ machine with the reference `foundation-models-c` sources present.
+
+```bash
+bun run build:release      # verify all artifacts
+npm pack --dry-run         # preview tarball contents
+gh auth login              # required once for GitHub Releases
+./scripts/release.sh patch # bump version, npm publish, git tag push, GitHub release
 ```
 
 ### N-API Rust Addon (Node.js backend)

@@ -34,16 +34,16 @@ and Apple's [Human Interface Guidelines on Generative AI](https://developer.appl
 ## Installation
 
 ```bash
-bun install apple-fm-sdk
+npm install apple-fm-sdk
+# or
+bun add apple-fm-sdk
 ```
 
-The native `foundation-models-c` dylib will be built automatically when the package is installed on macOS. If it is not built, run:
+The published package ships prebuilt native artifacts for **macOS arm64** (`build/libFoundationModels.dylib` and `build/apple_fm_sdk_napi.node`). No postinstall build step is required on supported platforms.
 
-```bash
-bun run build:native
-```
+> **Platform support:** macOS 26+ on Apple Silicon only. The package declares `os: ["darwin"]` and `cpu: ["arm64"]` so npm will warn on unsupported platforms.
 
-Alternatively, you can install from source using the development instructions below.
+To install from source or contribute, see [Development Installation](#development-installation) below.
 
 ## Documentation
 
@@ -78,6 +78,8 @@ await main();
 
 ### Streaming responses
 
+> **Note:** `streamResponse` yields **cumulative snapshots** (the full response generated so far), not deltas. To print incrementally, slice off the portion you have already seen.
+
 ```typescript
 import fm from "apple-fm-sdk";
 
@@ -86,8 +88,11 @@ const [isAvailable] = model.isAvailable();
 
 if (isAvailable) {
     const session = new fm.LanguageModelSession();
-    for await (const chunk of session.streamResponse("Tell me a short story about a cat")) {
-        process.stdout.write(chunk);
+    let previous = "";
+    for await (const snapshot of session.streamResponse("Tell me a short story about a cat")) {
+        const delta = snapshot.slice(previous.length);
+        process.stdout.write(delta);
+        previous = snapshot;
     }
 }
 ```
@@ -223,23 +228,18 @@ If you need to modify the SDK or install from source:
 1. Get the code
 
 ```bash
-git clone https://github.com/apple/ts-apple-fm-sdk
+git clone https://github.com/tariqwest/ts-apple-fm-sdk
 cd ts-apple-fm-sdk
 ```
 
-2. Install dependencies and build the native library
+2. Install dependencies and build all artifacts
 
 ```bash
 bun install
-bun run build:native
+bun run build:all
 ```
 
-3. (Optional) Build the Node.js N-API addon
-
-```bash
-cd native && cargo build --release
-cp native/target/release/libapple_fm_sdk_napi.dylib build/apple_fm_sdk_napi.node
-```
+This compiles the Swift `foundation-models-c` dylib, the Rust N-API addon, and the TypeScript SDK.
 
 4. Run the test suite
 
@@ -281,6 +281,24 @@ This project is not yet taking contributions. Stay tuned!
 - [afm-js](https://github.com/tariqwest/afm-js)
 
 
+## Publishing
+
+Maintainers can prepare a release tarball with:
+
+```bash
+bun run build:release   # build all artifacts + verify package contents
+npm pack --dry-run      # preview the tarball
+```
+
+To publish (requires [GitHub CLI](https://cli.github.com/) authenticated via `gh auth login`):
+
+```bash
+chmod +x scripts/release.sh
+./scripts/release.sh patch   # or minor / major
+```
+
+This bumps the version, publishes to npm, pushes the git tag, and creates a [GitHub Release](https://github.com/tariqwest/ts-apple-fm-sdk/releases) with the npm tarball attached.
+
 ## License
-For licensing see accompanying LICENSE file.
-Copyright (C) 2026 Apple Inc. All Rights Reserved.
+
+MIT — see [LICENSE](LICENSE).
