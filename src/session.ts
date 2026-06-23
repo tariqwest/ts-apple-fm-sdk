@@ -6,7 +6,7 @@
  */
 
 import { ManagedObject } from "./ffi/managed-object.js";
-import { getNativeBindings } from "./ffi/native.js";
+import { getNativeBindings, requirePointer } from "./ffi/native.js";
 import type { Pointer, FMComposedPrompt, FMTaskRef } from "./ffi/types.js";
 import { SystemLanguageModel } from "./core.js";
 import { composePrompt, type Prompt } from "./prompt.js";
@@ -47,10 +47,13 @@ export class LanguageModelSession extends ManagedObject {
 
     const modelPtr = options?.model?.ptr ?? null;
 
-    const ptr = native.languageModelSessionCreateFromSystemLanguageModel(
-      modelPtr,
-      options?.instructions ?? null,
-      bridgedTools.map((t) => t.ptr),
+    const ptr = requirePointer(
+      native.languageModelSessionCreateFromSystemLanguageModel(
+        modelPtr,
+        options?.instructions ?? null,
+        bridgedTools.map((t) => t.ptr),
+      ),
+      "languageModelSessionCreateFromSystemLanguageModel",
     );
 
     super(ptr);
@@ -255,9 +258,16 @@ export class LanguageModelSession extends ManagedObject {
       native.languageModelSessionResponseStreamIterate(streamRef, callback);
 
       while (true) {
-        if (queue.length === 0) {
+        while (queue.length === 0) {
           await new Promise<void>((resolve) => {
-            notify = resolve;
+            notify = () => {
+              notify = null;
+              resolve();
+            };
+            if (queue.length > 0) {
+              notify = null;
+              resolve();
+            }
           });
         }
 
@@ -286,10 +296,13 @@ export class LanguageModelSession extends ManagedObject {
     const tools = options?.tools ?? [];
     const bridgedTools = tools.map((tool) => createBridgedTool(tool));
 
-    const ptr = native.languageModelSessionCreateFromTranscript(
-      transcript.sessionPtr,
-      options?.model?.ptr ?? null,
-      bridgedTools.map((t) => t.ptr),
+    const ptr = requirePointer(
+      native.languageModelSessionCreateFromTranscript(
+        transcript.sessionPtr,
+        options?.model?.ptr ?? null,
+        bridgedTools.map((t) => t.ptr),
+      ),
+      "languageModelSessionCreateFromTranscript",
     );
 
     const session = LanguageModelSession.__privateFromPtr(ptr);

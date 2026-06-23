@@ -219,6 +219,10 @@ fn to_c_string(s: &str) -> napi::Result<CString> {
     CString::new(s).map_err(|_| napi::Error::from_reason("String contained null byte".to_string()))
 }
 
+fn lock_or_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn ptr_to_f64(ptr: *mut c_void) -> f64 {
     ptr as usize as f64
 }
@@ -678,18 +682,18 @@ fn register_string_callback(
         let js_string = env.create_string(&ctx.value)?;
         Ok(vec![js_string])
     })?;
-    registry.lock().unwrap().insert(id, tsfn);
+    lock_or_recover(registry).insert(id, tsfn);
     Ok(id)
 }
 
 fn call_string_callback(registry: &Mutex<HashMap<u64, StringCallback>>, id: u64, json: String) {
-    if let Some(tsfn) = registry.lock().unwrap().get(&id) {
+    if let Some(tsfn) = lock_or_recover(registry).get(&id) {
         let _ = tsfn.call(json, ThreadsafeFunctionCallMode::NonBlocking);
     }
 }
 
 fn remove_string_callback(registry: &Mutex<HashMap<u64, StringCallback>>, id: u64) {
-    registry.lock().unwrap().remove(&id);
+    lock_or_recover(registry).remove(&id);
 }
 
 fn marshal_text_response(status: c_int, content: *const c_char, length: size_t) -> String {
@@ -1021,9 +1025,9 @@ fn tool_ptr_to_slot() -> &'static Mutex<HashMap<usize, usize>> {
 
 fn free_tool_callback_slot(tool: *mut c_void) {
     let ptr_key = tool as usize;
-    let index = tool_ptr_to_slot().lock().unwrap().remove(&ptr_key);
+    let index = lock_or_recover(tool_ptr_to_slot()).remove(&ptr_key);
     if let Some(index) = index {
-        if let Some(tsfn) = tool_callbacks().lock().unwrap().remove(&index) {
+        if let Some(tsfn) = lock_or_recover(tool_callbacks()).remove(&index) {
             let _ = tsfn.abort();
         }
     }
@@ -1035,7 +1039,7 @@ fn tool_trampoline_inner(index: usize, content: *mut c_void, call_id: c_uint) {
         content as usize,
         call_id
     );
-    if let Some(tsfn) = tool_callbacks().lock().unwrap().get(&index) {
+    if let Some(tsfn) = lock_or_recover(tool_callbacks()).get(&index) {
         let _ = tsfn.call(json, ThreadsafeFunctionCallMode::NonBlocking);
     }
 }
@@ -1147,7 +1151,7 @@ pub fn bridged_tool_create(
     parameters: f64,
     callback: JsFunction,
 ) -> napi::Result<f64> {
-    let mut map = tool_callbacks().lock().unwrap();
+    let mut map = lock_or_recover(tool_callbacks());
     let index = (0..MAX_TOOL_CALLBACKS)
         .find(|i| !map.contains_key(i))
         .ok_or_else(|| napi::Error::from_reason("Too many bridged tools (max 64)".to_string()))?;
@@ -1178,7 +1182,7 @@ pub fn bridged_tool_create(
     };
     if tool.is_null() {
         // Free the slot on failure
-        tool_callbacks().lock().unwrap().remove(&index);
+        lock_or_recover(tool_callbacks()).remove(&index);
         return Err(napi::Error::from_reason(take_c_string(error_description)));
     }
     tool_ptr_to_slot()
@@ -1216,7 +1220,7 @@ pub fn set_active_tool_callback(callback: JsFunction) -> napi::Result<()> {
         let js_string = env.create_string(&ctx.value)?;
         Ok(vec![js_string])
     })?;
-    let mut guard = ACTIVE_TOOL_CALLBACK.lock().unwrap();
+    let mut guard = lock_or_recover(&ACTIVE_TOOL_CALLBACK);
     if let Some(old) = guard.take() {
         let _ = old.abort();
     }

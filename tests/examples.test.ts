@@ -86,6 +86,26 @@ describe.skipIf(!process.env.FM_NATIVE)("Python SDK examples (e2e)", () => {
     expect(responseEntries.length).toBeGreaterThan(0);
   });
 
+  it("guided generation: produces structured output", async () => {
+    const { SystemLanguageModel } = await import("../src/core.js");
+    const { LanguageModelSession } = await import("../src/session.js");
+    const { ProductAnyOfGuide } = await import("./helpers/schemas.js");
+
+    const model = new SystemLanguageModel();
+    const [available] = model.isAvailable();
+    expect(available).toBe(true);
+
+    const session = new LanguageModelSession();
+    const schema = ProductAnyOfGuide.generationSchema();
+    const content = await session.respond("Generate a product listing", {
+      generating: schema,
+    });
+
+    const parsed = ProductAnyOfGuide.parse(content);
+    expect(typeof parsed.category).toBe("string");
+    expect(typeof parsed.status).toBe("string");
+  });
+
   it("transcript processing: restores a transcript from a JSON dict", async () => {
     const { LanguageModelSession } = await import("../src/session.js");
     const { Transcript } = await import("../src/transcript.js");

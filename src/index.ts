@@ -31,6 +31,8 @@ export {
   SystemLanguageModelGuardrails,
   SystemLanguageModelUnavailableReason,
   type SystemLanguageModelOptions,
+  type TokenCountInput,
+  type TokenCountOptions,
 } from "./core.js";
 
 // --- Session ---
@@ -115,7 +117,7 @@ export {
 } from "./type-conversion.js";
 
 // --- FFI (advanced usage) ---
-export { getNativeBindings } from "./ffi/native.js";
+export { getNativeBindings, isNativeAvailable } from "./ffi/native.js";
 export { ManagedObject } from "./ffi/managed-object.js";
 
 // --- Default export (Python-style namespace) ---
@@ -125,6 +127,7 @@ import {
   SystemLanguageModelGuardrails,
   SystemLanguageModelUnavailableReason,
 } from "./core.js";
+import { isNativeAvailable } from "./ffi/native.js";
 import { LanguageModelSession } from "./session.js";
 import {
   Attachment,
@@ -164,6 +167,7 @@ import {
 } from "./type-conversion.js";
 
 const fm = {
+  isNativeAvailable,
   SystemLanguageModel,
   SystemLanguageModelUseCase,
   SystemLanguageModelGuardrails,

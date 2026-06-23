@@ -5,7 +5,7 @@
  * related types from prompt.py.
  */
 
-import { getNativeBindings } from "./ffi/native.js";
+import { getNativeBindings, requirePointer } from "./ffi/native.js";
 import type { FMComposedPrompt } from "./ffi/types.js";
 
 // --- Errors ---
@@ -80,7 +80,10 @@ export type Prompt = PromptComponent | PromptComponent[];
  */
 export function composePrompt(prompt: Prompt): FMComposedPrompt {
   const native = getNativeBindings();
-  const composedPtr = native.composedPromptInitialize();
+  const composedPtr = requirePointer(
+    native.composedPromptInitialize(),
+    "composedPromptInitialize",
+  );
 
   const components = Array.isArray(prompt) ? prompt : [prompt];
 

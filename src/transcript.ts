@@ -7,8 +7,6 @@
 
 import { getNativeBindings } from "./ffi/native.js";
 import type { FMLanguageModelSessionRef } from "./ffi/types.js";
-import { statusCodeToError } from "./errors.js";
-
 export class Transcript {
   private _sessionPtr: FMLanguageModelSessionRef;
 

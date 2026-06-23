@@ -6,8 +6,14 @@
  */
 
 import { ManagedObject } from "./ffi/managed-object.js";
-import { getNativeBindings } from "./ffi/native.js";
-import type { Pointer } from "./ffi/types.js";
+import { getNativeBindings, requirePointer } from "./ffi/native.js";
+import type { Pointer, TokenCountCallback } from "./ffi/types.js";
+import { composePrompt, type Prompt } from "./prompt.js";
+import { GenerationSchema } from "./generation-schema.js";
+import { Transcript } from "./transcript.js";
+import { Tool } from "./tool.js";
+import { createBridgedTool } from "./tool-bridge.js";
+import { GenerationErrorCode, statusCodeToError } from "./errors.js";
 
 // --- Enums ---
 
@@ -50,6 +56,12 @@ export interface SystemLanguageModelOptions {
   guardrails?: SystemLanguageModelGuardrails;
 }
 
+export type TokenCountInput = Prompt | GenerationSchema | Transcript | Tool[];
+
+export interface TokenCountOptions {
+  instructions?: string;
+}
+
 // --- Class ---
 
 export class SystemLanguageModel extends ManagedObject {
@@ -58,7 +70,10 @@ export class SystemLanguageModel extends ManagedObject {
     const useCase = options?.useCase ?? SystemLanguageModelUseCase.GENERAL;
     const guardrails = options?.guardrails ?? SystemLanguageModelGuardrails.DEFAULT;
 
-    const ptr = native.systemLanguageModelCreate(useCase, guardrails);
+    const ptr = requirePointer(
+      native.systemLanguageModelCreate(useCase, guardrails),
+      "systemLanguageModelCreate",
+    );
     super(ptr);
   }
 
@@ -85,5 +100,95 @@ export class SystemLanguageModel extends ManagedObject {
   getContextSize(): number {
     const native = getNativeBindings();
     return native.systemLanguageModelGetContextSize(this.ptr);
+  }
+
+  /**
+   * Count the number of tokens an input would consume without running generation.
+   *
+   * Pass a prompt, schema, transcript, or tool list as `value`, or pass
+   * `instructions` via `options` (mutually exclusive).
+   */
+  async tokenCount(
+    value?: TokenCountInput,
+    options?: TokenCountOptions,
+  ): Promise<number> {
+    const native = getNativeBindings();
+    const { instructions } = options ?? {};
+
+    if (instructions !== undefined) {
+      if (value !== undefined) {
+        throw new Error(
+          "Provide either a value or instructions to tokenCount(), not both",
+        );
+      }
+      return this._runTokenCount((callback) =>
+        native.systemLanguageModelTokenCountForInstructions(this.ptr, instructions, callback),
+      );
+    }
+
+    if (value === undefined) {
+      throw new Error("tokenCount() requires either a value or instructions");
+    }
+
+    if (value instanceof GenerationSchema) {
+      return this._runTokenCount((callback) =>
+        native.systemLanguageModelTokenCountForSchema(this.ptr, value.ptr, callback),
+      );
+    }
+
+    if (value instanceof Transcript) {
+      return this._runTokenCount((callback) =>
+        native.systemLanguageModelTokenCountForTranscript(this.ptr, value.sessionPtr, callback),
+      );
+    }
+
+    if (Array.isArray(value) && value.every((item) => item instanceof Tool)) {
+      const bridgedTools = value.map((tool) => createBridgedTool(tool));
+      try {
+        return await this._runTokenCount((callback) =>
+          native.systemLanguageModelTokenCountForTools(
+            this.ptr,
+            bridgedTools.map((tool) => tool.ptr),
+            callback,
+          ),
+        );
+      } finally {
+        for (const tool of bridgedTools) {
+          tool.release();
+        }
+      }
+    }
+
+    const composedPrompt = composePrompt(value);
+    try {
+      return await this._runTokenCount((callback) =>
+        native.systemLanguageModelTokenCountForPrompt(this.ptr, composedPrompt, callback),
+      );
+    } finally {
+      native.fmRelease(composedPrompt);
+    }
+  }
+
+  private _runTokenCount(
+    start: (callback: TokenCountCallback) => Pointer,
+  ): Promise<number> {
+    const native = getNativeBindings();
+    return new Promise((resolve, reject) => {
+      let completed = false;
+      let task: Pointer | null = null;
+
+      const callback: TokenCountCallback = (status, count, errorDescription) => {
+        if (completed) return;
+        completed = true;
+        if (task) native.fmRelease(task);
+        if (status !== GenerationErrorCode.SUCCESS) {
+          reject(statusCodeToError(status, errorDescription));
+        } else {
+          resolve(count);
+        }
+      };
+
+      task = start(callback);
+    });
   }
 }

@@ -6,7 +6,7 @@
  */
 
 import { ManagedObject } from "./ffi/managed-object.js";
-import { getNativeBindings } from "./ffi/native.js";
+import { getNativeBindings, requirePointer } from "./ffi/native.js";
 import type { Pointer } from "./ffi/types.js";
 import type { ZodObject, ZodRawShape, ZodTypeAny } from "zod";
 import {
@@ -16,7 +16,6 @@ import {
   unwrapZodType,
 } from "./type-conversion.js";
 import type { GuideConstraints } from "./generation-guide.js";
-import { statusCodeToError } from "./errors.js";
 
 // --- Property metadata stored alongside Zod fields ---
 
@@ -48,7 +47,10 @@ export class GenerationSchema extends ManagedObject {
   ) {
     const native = getNativeBindings();
 
-    const schemaRef = native.generationSchemaCreate(name, description ?? null);
+    const schemaRef = requirePointer(
+      native.generationSchemaCreate(name, description ?? null),
+      "generationSchemaCreate",
+    );
 
     // Add properties
     for (const [propName, meta] of properties) {

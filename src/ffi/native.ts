@@ -10,7 +10,27 @@ import { resolve, dirname } from "node:path";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import type { Pointer } from "./types.js";
+import {
+  dispatchResponseEvent,
+  dispatchStructuredResponseEvent,
+  dispatchTokenCountEvent,
+  dispatchToolCallEvent,
+} from "./events.js";
+import type {
+  Pointer,
+  ResponseCallback,
+  StructuredResponseCallback,
+  TokenCountCallback,
+  ToolCallCallback,
+} from "./types.js";
+
+export type {
+  ResponseCallback,
+  StructuredResponseCallback,
+  TokenCountCallback,
+  ToolCallCallback,
+} from "./types.js";
+export { requirePointer } from "./pointer.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -34,11 +54,19 @@ function asPtr(value: bigint | number): Pointer {
   return Number(value) as Pointer;
 }
 
-/** JS-friendly callback event types. */
-export type ResponseCallback = (status: number, text: string | null) => void;
-export type StructuredResponseCallback = (status: number, contentPtr: Pointer | null) => void;
-export type TokenCountCallback = (status: number, count: number, errorDescription?: string) => void;
-export type ToolCallCallback = (contentPtr: Pointer, callId: number) => void;
+/** Check whether the N-API addon is present and loadable without throwing. */
+export function isNativeAvailable(): boolean {
+  for (const p of NODE_ADDON_SEARCH_PATHS) {
+    if (!existsSync(p)) continue;
+    try {
+      const addon = require(p) as { ping?: () => number };
+      return addon.ping?.() === 42;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
 
 export interface NativeBindings {
   // --- SystemLanguageModel ---
@@ -200,7 +228,6 @@ export interface NativeBindings {
   ): Pointer;
   bridgedToolFinishCall(tool: Pointer, callId: number, output: string): void;
   bridgedToolDestroy(tool: Pointer): void;
-  setActiveToolCallback(callback: ToolCallCallback): void;
 
   // --- Memory management ---
   fmRetain(ptr: Pointer): void;
@@ -236,20 +263,7 @@ export function getNativeBindings(): NativeBindings {
       addon.composedPromptAddAttachment(prompt, imagePath, label),
 
     languageModelSessionRespond: (session, prompt, optionsJSON, callback) => {
-      const nativeCallback = (json: string) => {
-        if (!json) {
-          callback(0, null);
-          return;
-        }
-        const event = JSON.parse(json);
-        if (event.type === "content") {
-          callback(0, event.payload.text);
-        } else if (event.type === "done") {
-          callback(0, null);
-        } else if (event.type === "error") {
-          callback(event.payload.status, null);
-        }
-      };
+      const nativeCallback = (json: string) => dispatchResponseEvent(json, callback);
       return asPtr(addon.languageModelSessionRespond(session, prompt, optionsJSON, nativeCallback));
     },
 
@@ -257,100 +271,44 @@ export function getNativeBindings(): NativeBindings {
       asPtr(addon.languageModelSessionStreamResponse(session, prompt, optionsJSON)),
 
     languageModelSessionResponseStreamIterate: (stream, callback) => {
-      const nativeCallback = (json: string) => {
-        const event = JSON.parse(json);
-        if (event.type === "content") {
-          callback(0, event.payload.text);
-        } else if (event.type === "done") {
-          callback(0, null);
-        } else if (event.type === "error") {
-          callback(event.payload.status, null);
-        }
-      };
+      const nativeCallback = (json: string) => dispatchResponseEvent(json, callback);
       addon.languageModelSessionResponseStreamIterate(stream, nativeCallback);
     },
 
     languageModelSessionRespondWithSchema: (session, prompt, schema, optionsJSON, callback) => {
-      const nativeCallback = (json: string) => {
-        const event = JSON.parse(json);
-        if (event.type === "content") {
-          callback(0, asPtr(event.payload.contentPtr));
-        } else if (event.type === "error") {
-          callback(event.payload.status, null);
-        }
-      };
+      const nativeCallback = (json: string) =>
+        dispatchStructuredResponseEvent(json, callback);
       return asPtr(addon.languageModelSessionRespondWithSchema(session, prompt, schema, optionsJSON, nativeCallback));
     },
 
     languageModelSessionRespondWithSchemaFromJSON: (session, prompt, schemaJSON, optionsJSON, callback) => {
-      const nativeCallback = (json: string) => {
-        const event = JSON.parse(json);
-        if (event.type === "content") {
-          callback(0, asPtr(event.payload.contentPtr));
-        } else if (event.type === "error") {
-          callback(event.payload.status, null);
-        }
-      };
+      const nativeCallback = (json: string) =>
+        dispatchStructuredResponseEvent(json, callback);
       return asPtr(addon.languageModelSessionRespondWithSchemaFromJson(session, prompt, schemaJSON, optionsJSON, nativeCallback));
     },
 
     systemLanguageModelTokenCountForPrompt: (model, prompt, callback) => {
-      const nativeCallback = (json: string) => {
-        const event = JSON.parse(json);
-        if (event.type === "count") {
-          callback(0, event.payload.count);
-        } else if (event.type === "error") {
-          callback(event.payload.status, 0, event.payload.description);
-        }
-      };
+      const nativeCallback = (json: string) => dispatchTokenCountEvent(json, callback);
       return asPtr(addon.systemLanguageModelTokenCountForPrompt(model, prompt, nativeCallback));
     },
 
     systemLanguageModelTokenCountForInstructions: (model, instructions, callback) => {
-      const nativeCallback = (json: string) => {
-        const event = JSON.parse(json);
-        if (event.type === "count") {
-          callback(0, event.payload.count);
-        } else if (event.type === "error") {
-          callback(event.payload.status, 0, event.payload.description);
-        }
-      };
+      const nativeCallback = (json: string) => dispatchTokenCountEvent(json, callback);
       return asPtr(addon.systemLanguageModelTokenCountForInstructions(model, instructions, nativeCallback));
     },
 
     systemLanguageModelTokenCountForTools: (model, tools, callback) => {
-      const nativeCallback = (json: string) => {
-        const event = JSON.parse(json);
-        if (event.type === "count") {
-          callback(0, event.payload.count);
-        } else if (event.type === "error") {
-          callback(event.payload.status, 0, event.payload.description);
-        }
-      };
+      const nativeCallback = (json: string) => dispatchTokenCountEvent(json, callback);
       return asPtr(addon.systemLanguageModelTokenCountForTools(model, tools, nativeCallback));
     },
 
     systemLanguageModelTokenCountForSchema: (model, schema, callback) => {
-      const nativeCallback = (json: string) => {
-        const event = JSON.parse(json);
-        if (event.type === "count") {
-          callback(0, event.payload.count);
-        } else if (event.type === "error") {
-          callback(event.payload.status, 0, event.payload.description);
-        }
-      };
+      const nativeCallback = (json: string) => dispatchTokenCountEvent(json, callback);
       return asPtr(addon.systemLanguageModelTokenCountForSchema(model, schema, nativeCallback));
     },
 
     systemLanguageModelTokenCountForTranscript: (model, transcript, callback) => {
-      const nativeCallback = (json: string) => {
-        const event = JSON.parse(json);
-        if (event.type === "count") {
-          callback(0, event.payload.count);
-        } else if (event.type === "error") {
-          callback(event.payload.status, 0, event.payload.description);
-        }
-      };
+      const nativeCallback = (json: string) => dispatchTokenCountEvent(json, callback);
       return asPtr(addon.systemLanguageModelTokenCountForTranscript(model, transcript, nativeCallback));
     },
 
@@ -387,16 +345,11 @@ export function getNativeBindings(): NativeBindings {
     generatedContentIsComplete: (content) => addon.generatedContentIsComplete(content),
 
     bridgedToolCreate: (name, description, parameters, callback) =>
-      asPtr(addon.bridgedToolCreate(name, description, parameters, (json: string) => {
-        const event = JSON.parse(json);
-        callback(asPtr(event.contentPtr), event.callId);
-      })),
+      asPtr(addon.bridgedToolCreate(name, description, parameters, (json: string) =>
+        dispatchToolCallEvent(json, callback),
+      )),
     bridgedToolFinishCall: (tool, callId, output) => addon.bridgedToolFinishCall(tool, callId, output),
     bridgedToolDestroy: (tool) => addon.bridgedToolDestroy(tool),
-    setActiveToolCallback: (callback) => addon.setActiveToolCallback((json: string) => {
-      const event = JSON.parse(json);
-      callback(asPtr(event.contentPtr), event.callId);
-    }),
 
     fmRetain: (ptr) => addon.fmRetain(ptr),
     fmRelease: (ptr) => addon.fmRelease(ptr),

@@ -261,7 +261,7 @@ bun run check
 
 ## Key Differences from the Python SDK
 
-- **Runtime**: The TypeScript SDK runs on [Bun](https://bun.sh/) using `bun:ffi` directly, and on Node.js via the Rust N-API addon in `native/` (built with `cargo build --release`). Both use the same `NativeBindings` abstraction.
+- **Runtime**: The TypeScript SDK runs on both [Bun](https://bun.sh/) and Node.js via the Rust N-API addon in `native/` (built with `bun run build:napi`). Both runtimes load the same `.node` artifact through the `NativeBindings` abstraction.
 - **Generables**: Python uses a `@fm.generable` class decorator; TypeScript uses a `fm.generable(zodSchema)` factory function because decorators are less idiomatic in TypeScript.
 - **Schema constraints**: Python uses `fm.guide("description", range=(0, 20))`; TypeScript uses `fm.guide(z.number(), { description: "Age in years", range: [0, 20] })`.
 - **Tool return values**: Tools in both SDKs return strings that are passed back to the model.

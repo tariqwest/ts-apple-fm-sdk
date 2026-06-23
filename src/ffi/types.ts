@@ -89,3 +89,17 @@ export type FMBridgedToolCallable = (
   content: FMGeneratedContentRef,
   callId: number,
 ) => void;
+
+// --- JS-friendly callback types (used by NativeBindings) ---
+
+export type ResponseCallback = (status: number, text: string | null) => void;
+export type StructuredResponseCallback = (
+  status: number,
+  contentPtr: Pointer | null,
+) => void;
+export type TokenCountCallback = (
+  status: number,
+  count: number,
+  errorDescription?: string,
+) => void;
+export type ToolCallCallback = (contentPtr: Pointer, callId: number) => void;
