@@ -98,7 +98,7 @@ The TypeScript SDK uses [Zod](https://zod.dev/) schemas and the `guide()` helper
 
 ```typescript
 import fm from "apple-fm-sdk";
-import { z } from "zod";
+import z from "zod";
 
 const Cat = fm.generable(
     z.object({
@@ -137,7 +137,7 @@ Define tools by extending the `Tool` class. The model can invoke them during a c
 
 ```typescript
 import fm from "apple-fm-sdk";
-import { z } from "zod";
+import z from "zod";
 
 const WeatherParams = fm.generable(
     z.object({
@@ -234,7 +234,14 @@ bun install
 bun run build:native
 ```
 
-3. Run the test suite
+3. (Optional) Build the Node.js N-API addon
+
+```bash
+cd native && cargo build --release
+cp native/target/release/libapple_fm_sdk_napi.dylib build/apple_fm_sdk_napi.node
+```
+
+4. Run the test suite
 
 ```bash
 bun run test
@@ -246,7 +253,7 @@ To run tests that exercise the native FFI layer (requires a macOS 26+ machine wi
 FM_NATIVE=1 bun run test
 ```
 
-4. Type-check the project
+5. Type-check the project
 
 ```bash
 bun run check
@@ -254,7 +261,7 @@ bun run check
 
 ## Key Differences from the Python SDK
 
-- **Runtime**: The TypeScript SDK requires [Bun](https://bun.sh/) for its native FFI support (`bun:ffi`). Node.js support is planned via a future N-API adapter behind the same `NativeBindings` abstraction.
+- **Runtime**: The TypeScript SDK runs on [Bun](https://bun.sh/) using `bun:ffi` directly, and on Node.js via the Rust N-API addon in `native/` (built with `cargo build --release`). Both use the same `NativeBindings` abstraction.
 - **Generables**: Python uses a `@fm.generable` class decorator; TypeScript uses a `fm.generable(zodSchema)` factory function because decorators are less idiomatic in TypeScript.
 - **Schema constraints**: Python uses `fm.guide("description", range=(0, 20))`; TypeScript uses `fm.guide(z.number(), { description: "Age in years", range: [0, 20] })`.
 - **Tool return values**: Tools in both SDKs return strings that are passed back to the model.
@@ -263,7 +270,17 @@ bun run check
 
 This project is not yet taking contributions. Stay tuned!
 
----
+## Reference & Inspiration
 
+- [Python SDK](https://github.com/apple/python-apple-fm-sdk)
+- [Swift SDK](https://github.com/apple/swift-apple-fm-sdk)
+- [apple-on-device-ai](https://github.com/meridius-labs/apple-on-device-ai)
+- [apfel](https://github.com/Arthur-Ficial/apfel)
+- [tsfm](https://github.com/codybrom/tsfm)
+- [apfel-plus](https://github.com/tariqwest/apfel-plus)
+- [afm-js](https://github.com/tariqwest/afm-js)
+
+
+## License
 For licensing see accompanying LICENSE file.
 Copyright (C) 2026 Apple Inc. All Rights Reserved.
