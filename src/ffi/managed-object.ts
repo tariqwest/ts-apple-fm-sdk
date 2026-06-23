@@ -20,7 +20,7 @@ import { getNativeBindings } from "./native.js";
 const pointerRegistry = new FinalizationRegistry<Pointer>((ptr) => {
   try {
     const native = getNativeBindings();
-    native.FMRelease(ptr);
+    native.fmRelease(ptr);
   } catch {
     // If native bindings aren't available during shutdown, ignore.
   }
@@ -57,7 +57,7 @@ export class ManagedObject {
     pointerRegistry.unregister(this);
     try {
       const native = getNativeBindings();
-      native.FMRelease(this._ptr);
+      native.fmRelease(this._ptr);
     } catch {
       // Ignore if native not available
     }
@@ -67,6 +67,6 @@ export class ManagedObject {
   /** Retain the pointer (increment reference count). */
   retain(): void {
     const native = getNativeBindings();
-    native.FMRetain(this.ptr);
+    native.fmRetain(this.ptr);
   }
 }

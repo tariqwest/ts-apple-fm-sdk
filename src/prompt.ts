@@ -6,7 +6,7 @@
  */
 
 import { getNativeBindings } from "./ffi/native.js";
-import type { Pointer, FMComposedPrompt } from "./ffi/types.js";
+import type { FMComposedPrompt } from "./ffi/types.js";
 
 // --- Errors ---
 
@@ -49,38 +49,14 @@ export class ImageAttachment extends Attachment {
 
   addToComposedPrompt(composedPromptPtr: FMComposedPrompt): void {
     const native = getNativeBindings();
-    const encoder = new TextEncoder();
-
-    const pathBuf = encoder.encode(this.path + "\0");
-    const pathPtr = Buffer.from(pathBuf) as unknown as Pointer;
-
-    let labelPtr: Pointer | null = null;
-    if (this.label) {
-      const labelBuf = encoder.encode(this.label + "\0");
-      labelPtr = Buffer.from(labelBuf) as unknown as Pointer;
-    }
-
-    // Allocate error out-param (4-byte int)
-    const errorBuf = new Int32Array(1);
-    const errorPtr = Buffer.from(errorBuf.buffer) as unknown as Pointer;
-
-    const success = native.FMComposedPromptAddAttachment(
+    const success = native.composedPromptAddAttachment(
       composedPromptPtr,
-      pathPtr,
-      labelPtr,
-      errorPtr,
+      this.path,
+      this.label ?? null,
     );
 
     if (!success) {
-      const errorCode = errorBuf[0];
-      switch (errorCode) {
-        case 1:
-          throw new ImagePromptError("Image attachments require macOS 27+");
-        case 2:
-          throw new ImagePromptError("Image attachments require SDK with macOS 27+ support");
-        default:
-          throw new ImagePromptError("Failed to add image attachment");
-      }
+      throw new ImagePromptError("Failed to add image attachment");
     }
   }
 }
@@ -104,16 +80,13 @@ export type Prompt = PromptComponent | PromptComponent[];
  */
 export function composePrompt(prompt: Prompt): FMComposedPrompt {
   const native = getNativeBindings();
-  const composedPtr = native.FMComposedPromptInitialize();
+  const composedPtr = native.composedPromptInitialize();
 
   const components = Array.isArray(prompt) ? prompt : [prompt];
 
   for (const component of components) {
     if (typeof component === "string") {
-      const encoder = new TextEncoder();
-      const textBuf = encoder.encode(component + "\0");
-      const textPtr = Buffer.from(textBuf) as unknown as Pointer;
-      native.FMComposedPromptAddText(composedPtr, textPtr);
+      native.composedPromptAddText(composedPtr, component);
     } else if (component instanceof Attachment) {
       component.addToComposedPrompt(composedPtr);
     } else {

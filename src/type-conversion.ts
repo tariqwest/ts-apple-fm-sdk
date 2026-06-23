@@ -5,7 +5,7 @@
  * Mirrors Python SDK's type_conversion.py.
  */
 
-import { z, type ZodTypeAny } from "zod";
+import z, { type ZodTypeAny } from "zod";
 
 /**
  * Convert a Zod type to the Swift type string expected by

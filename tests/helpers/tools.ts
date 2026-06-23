@@ -4,7 +4,7 @@
  * Mirrors the Python test tools in tester_tools/tester_tools.py.
  */
 
-import { z } from "zod";
+import z from "zod";
 import { guide } from "../../src/generation-guide.js";
 import { generable, GeneratedContent } from "../../src/generable.js";
 import { GenerationSchema } from "../../src/generation-schema.js";

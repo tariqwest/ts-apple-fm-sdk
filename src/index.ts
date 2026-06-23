@@ -7,7 +7,7 @@
  * @example
  * ```ts
  * import fm from "apple-fm-sdk";
- * import { z } from "zod";
+ * import z from "zod";
  *
  * const model = new fm.SystemLanguageModel();
  * const [available, reason] = model.isAvailable();
@@ -115,5 +115,5 @@ export {
 } from "./type-conversion.js";
 
 // --- FFI (advanced usage) ---
-export { getNativeBindings, isNativeAvailable } from "./ffi/native.js";
+export { getNativeBindings } from "./ffi/native.js";
 export { ManagedObject } from "./ffi/managed-object.js";

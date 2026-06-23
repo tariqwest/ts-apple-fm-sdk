@@ -9,7 +9,7 @@
  * types from the Python SDK.
  */
 
-import { z, type ZodObject, type ZodRawShape, type ZodTypeAny } from "zod";
+import z, { type ZodObject, type ZodRawShape, type ZodTypeAny } from "zod";
 import { ManagedObject } from "./ffi/managed-object.js";
 import { getNativeBindings } from "./ffi/native.js";
 import type { Pointer, FMGeneratedContentRef } from "./ffi/types.js";
@@ -48,9 +48,21 @@ export class GeneratedContent {
     id?: GenerationID,
     ptr?: FMGeneratedContentRef,
   ) {
-    this._contentDict = contentDict ?? {};
     this.id = id ?? new GenerationID();
     this._ptr = ptr ?? null;
+
+    if (contentDict) {
+      this._contentDict = contentDict;
+    } else if (this._ptr) {
+      // Read JSON from the C pointer and release it immediately.
+      const native = getNativeBindings();
+      const jsonStr = native.generatedContentGetJSONString(this._ptr);
+      this._contentDict = JSON.parse(jsonStr) as Record<string, unknown>;
+      native.fmRelease(this._ptr);
+      this._ptr = null;
+    } else {
+      this._contentDict = {};
+    }
   }
 
   /** Create from a JSON string. */
@@ -88,7 +100,7 @@ export class GeneratedContent {
     if (this._ptr) {
       try {
         const native = getNativeBindings();
-        return native.FMGeneratedContentIsComplete(this._ptr);
+        return native.generatedContentIsComplete(this._ptr);
       } catch {
         return true;
       }

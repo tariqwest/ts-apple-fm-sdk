@@ -58,7 +58,7 @@ export class SystemLanguageModel extends ManagedObject {
     const useCase = options?.useCase ?? SystemLanguageModelUseCase.GENERAL;
     const guardrails = options?.guardrails ?? SystemLanguageModelGuardrails.DEFAULT;
 
-    const ptr = native.FMSystemLanguageModelCreate(useCase, guardrails);
+    const ptr = native.systemLanguageModelCreate(useCase, guardrails);
     super(ptr);
   }
 
@@ -70,26 +70,20 @@ export class SystemLanguageModel extends ManagedObject {
    */
   isAvailable(): [boolean, SystemLanguageModelUnavailableReason | undefined] {
     const native = getNativeBindings();
-
-    // Allocate a 4-byte buffer for the out-parameter (C int enum).
-    // In Bun FFI, we pass a pointer to this buffer.
-    const reasonBuf = new Int32Array(1);
-    const reasonPtr = Buffer.from(reasonBuf.buffer) as unknown as Pointer;
-
-    const available = native.FMSystemLanguageModelIsAvailable(this.ptr, reasonPtr);
+    const { available, reason } = native.systemLanguageModelIsAvailable(this.ptr);
 
     if (available) {
       return [true, undefined];
     }
 
-    const reasonCode = reasonBuf[0] ?? 0xff;
-    const reason = UNAVAILABLE_REASON_MAP[reasonCode] ?? SystemLanguageModelUnavailableReason.UNKNOWN;
-    return [false, reason];
+    const reasonCode = reason ?? 0xff;
+    const mappedReason = UNAVAILABLE_REASON_MAP[reasonCode] ?? SystemLanguageModelUnavailableReason.UNKNOWN;
+    return [false, mappedReason];
   }
 
   /** Get the model's maximum context window size in tokens. */
   getContextSize(): number {
     const native = getNativeBindings();
-    return native.FMSystemLanguageModelGetContextSize(this.ptr);
+    return native.systemLanguageModelGetContextSize(this.ptr);
   }
 }

@@ -7,15 +7,16 @@
 
 import { ManagedObject } from "./ffi/managed-object.js";
 import { getNativeBindings } from "./ffi/native.js";
-import type { Pointer, FMComposedPrompt } from "./ffi/types.js";
+import type { Pointer, FMComposedPrompt, FMTaskRef } from "./ffi/types.js";
 import { SystemLanguageModel } from "./core.js";
 import { composePrompt, type Prompt } from "./prompt.js";
 import { type GenerationOptions } from "./generation-options.js";
 import { statusCodeToError, GenerationErrorCode } from "./errors.js";
-import type { GenerationSchema } from "./generation-schema.js";
-import type { GeneratedContent } from "./generable.js";
+import { GenerationSchema } from "./generation-schema.js";
+import { GeneratedContent, type GenerableSchema } from "./generable.js";
 import type { Tool } from "./tool.js";
 import type { Transcript } from "./transcript.js";
+import { BridgedTool, createBridgedTool } from "./tool-bridge.js";
 
 // --- Options ---
 
@@ -27,171 +28,189 @@ export interface LanguageModelSessionOptions {
 
 export interface RespondOptions {
   options?: GenerationOptions;
-  generating?: GenerationSchema;
+  generating?: GenerationSchema | GenerableSchema<unknown>;
 }
 
 // --- Class ---
 
 export class LanguageModelSession extends ManagedObject {
   private _requestLock = false;
+  private _activeTask: FMTaskRef | null = null;
+  private _tools: Tool[] = [];
+  private _bridgedTools: BridgedTool[] = [];
 
   constructor(options?: LanguageModelSessionOptions) {
     const native = getNativeBindings();
-    const encoder = new TextEncoder();
 
-    // Encode instructions
-    let instructionsPtr: Pointer | null = null;
-    if (options?.instructions) {
-      instructionsPtr = Buffer.from(
-        encoder.encode(options.instructions + "\0"),
-      ) as unknown as Pointer;
-    }
-
-    // Build tools array pointer
-    let toolsPtr: Pointer | null = null;
-    const toolCount = options?.tools?.length ?? 0;
-    // TODO: Convert Tool[] to FMBridgedToolRef* array
-    // For now, tools require Phase 5 implementation
+    const tools = options?.tools ?? [];
+    const bridgedTools = tools.map((tool) => createBridgedTool(tool));
 
     const modelPtr = options?.model?.ptr ?? null;
 
-    const ptr = native.FMLanguageModelSessionCreateFromSystemLanguageModel(
+    const ptr = native.languageModelSessionCreateFromSystemLanguageModel(
       modelPtr,
-      instructionsPtr,
-      toolsPtr,
-      toolCount,
+      options?.instructions ?? null,
+      bridgedTools.map((t) => t.ptr),
     );
 
     super(ptr);
+    this._tools = tools;
+    this._bridgedTools = bridgedTools;
   }
 
   /** Whether a request is currently in progress. */
   get isResponding(): boolean {
     const native = getNativeBindings();
-    return native.FMLanguageModelSessionIsResponding(this.ptr);
+    return native.languageModelSessionIsResponding(this.ptr);
   }
 
   /** Reset the session, clearing conversation history. */
   reset(): void {
     const native = getNativeBindings();
-    native.FMLanguageModelSessionReset(this.ptr);
+    native.languageModelSessionReset(this.ptr);
+  }
+
+  /** Release the session and its bridged tools. */
+  release(): void {
+    if (this.isReleased) return;
+    for (const tool of this._bridgedTools) {
+      tool.release();
+    }
+    this._bridgedTools = [];
+    this._tools = [];
+    super.release();
   }
 
   /**
-   * Generate a text response to a prompt.
+   * Generate a response to a prompt.
    *
-   * Overloads:
-   * - `respond(prompt)` → `string`
-   * - `respond(prompt, { generating })` → `GeneratedContent` (structured)
+   * - Plain text: `respond(prompt)` returns the response string.
+   * - Structured: `respond(prompt, { generating: schema })` returns a
+   *   `GeneratedContent` instance.
    */
-  async respond(prompt: Prompt, opts?: RespondOptions): Promise<string> {
+  async respond(
+    prompt: Prompt,
+    opts?: RespondOptions,
+  ): Promise<string | GeneratedContent> {
     if (this._requestLock) {
       throw new Error("Session already has an active request");
     }
     this._requestLock = true;
 
+    const native = getNativeBindings();
+    let composedPrompt: FMComposedPrompt | null = null;
+
     try {
-      const composedPrompt = composePrompt(prompt);
-      const native = getNativeBindings();
+      composedPrompt = composePrompt(prompt);
+      const optionsJSON = opts?.options
+        ? JSON.stringify(opts.options.toJSON())
+        : null;
 
-      // Serialize options
-      let optionsJSON: Pointer | null = null;
-      if (opts?.options) {
-        const json = JSON.stringify(opts.options.toJSON());
-        optionsJSON = Buffer.from(
-          new TextEncoder().encode(json + "\0"),
-        ) as unknown as Pointer;
+      const schema = opts?.generating
+        ? opts.generating instanceof GenerationSchema
+          ? opts.generating
+          : opts.generating.generationSchema()
+        : null;
+
+      if (schema) {
+        return await this._respondStructured(composedPrompt, schema, optionsJSON);
       }
 
-      // If generating a schema, use structured response
-      if (opts?.generating) {
-        return this._respondStructured(composedPrompt, opts.generating, optionsJSON);
-      }
-
-      // Plain text response via callback
       return await this._respondText(composedPrompt, optionsJSON);
     } finally {
       this._requestLock = false;
+      if (this._activeTask) {
+        native.fmRelease(this._activeTask);
+        this._activeTask = null;
+      }
+      if (composedPrompt) native.fmRelease(composedPrompt);
     }
   }
 
-  /** Internal: plain text respond using FMLanguageModelSessionRespond. */
+  /** Internal: plain text respond using languageModelSessionRespond. */
   private _respondText(
     composedPrompt: FMComposedPrompt,
-    optionsJSON: Pointer | null,
+    optionsJSON: string | null,
   ): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       const native = getNativeBindings();
-
-      // The C callback accumulates content and signals completion with content=NULL
-      let accumulated = "";
       let completed = false;
+      let accumulated = "";
 
-      // Create callback function
-      const callback = (
-        status: number,
-        contentPtr: Pointer | null,
-        length: number,
-        _userInfo: Pointer | null,
-      ) => {
+      const callback = (status: number, text: string | null) => {
         if (completed) return;
 
-        if (status !== 0) {
+        if (status !== GenerationErrorCode.SUCCESS) {
           completed = true;
           reject(statusCodeToError(status));
           return;
         }
 
-        if (contentPtr === null || contentPtr === 0) {
-          // Completion signal
+        if (text === null) {
+          // End of stream
           completed = true;
           resolve(accumulated);
           return;
         }
 
-        // Read the accumulated string from the pointer
-        // The content pointer contains the full accumulated response
-        try {
-          const cString = Buffer.from(
-            (contentPtr as any) as ArrayBuffer,
-            0,
-            length,
-          ).toString("utf-8");
-          accumulated = cString;
-        } catch {
-          // Fallback: just use length
-          accumulated = `[response: ${length} bytes]`;
-        }
+        accumulated = text;
       };
 
-      // NOTE: The actual FFI callback mechanism requires Bun-specific
-      // JSCallback creation. This is a structural placeholder that will
-      // be refined when testing against the native library.
-      const taskRef = native.FMLanguageModelSessionRespond(
+      this._activeTask = native.languageModelSessionRespond(
         this.ptr,
         composedPrompt,
         optionsJSON,
-        null, // userInfo
-        callback as unknown as Pointer, // Will be JSCallback in actual Bun FFI
+        callback,
       );
-
-      // Store task ref for potential cancellation
-      // taskRef will be released by the callback completion
     });
   }
 
-  /** Internal: structured respond using FMLanguageModelSessionRespondWithSchema. */
-  private async _respondStructured(
-    _composedPrompt: FMComposedPrompt,
-    _schema: GenerationSchema,
-    _optionsJSON: Pointer | null,
-  ): Promise<string> {
-    // TODO: Implement in Phase 4 (Guided Generation)
-    throw new Error("Structured generation not yet implemented");
+  /** Internal: structured respond using languageModelSessionRespondWithSchema. */
+  private _respondStructured(
+    composedPrompt: FMComposedPrompt,
+    schema: GenerationSchema,
+    optionsJSON: string | null,
+  ): Promise<GeneratedContent> {
+    return new Promise<GeneratedContent>((resolve, reject) => {
+      const native = getNativeBindings();
+      let completed = false;
+
+      const callback = (status: number, contentPtr: Pointer | null) => {
+        if (completed) return;
+
+        if (status !== GenerationErrorCode.SUCCESS) {
+          completed = true;
+          if (contentPtr) native.fmRelease(contentPtr);
+          reject(statusCodeToError(status));
+          return;
+        }
+
+        if (!contentPtr) {
+          completed = true;
+          reject(new Error("No content returned from guided generation"));
+          return;
+        }
+
+        const content = new GeneratedContent(undefined, undefined, contentPtr);
+        completed = true;
+        resolve(content);
+      };
+
+      this._activeTask = native.languageModelSessionRespondWithSchema(
+        this.ptr,
+        composedPrompt,
+        schema.ptr,
+        optionsJSON,
+        callback,
+      );
+    });
   }
 
   /**
-   * Stream a response as an async iterable of text chunks.
+   * Stream a response as an async iterable of text snapshots.
+   *
+   * Each yielded value is the complete response generated so far, not just
+   * the delta since the previous chunk. This matches the Python SDK behavior.
    */
   async *streamResponse(
     prompt: Prompt,
@@ -202,101 +221,61 @@ export class LanguageModelSession extends ManagedObject {
     }
     this._requestLock = true;
 
+    const native = getNativeBindings();
+    let composedPrompt: FMComposedPrompt | null = null;
+    let streamRef: Pointer | null = null;
+
     try {
-      const composedPrompt = composePrompt(prompt);
-      const native = getNativeBindings();
+      composedPrompt = composePrompt(prompt);
+      const optionsJSON = options ? JSON.stringify(options.toJSON()) : null;
 
-      // Serialize options
-      let optionsJSON: Pointer | null = null;
-      if (options) {
-        const json = JSON.stringify(options.toJSON());
-        optionsJSON = Buffer.from(
-          new TextEncoder().encode(json + "\0"),
-        ) as unknown as Pointer;
-      }
-
-      // Create the stream
-      const streamRef = native.FMLanguageModelSessionStreamResponse(
+      streamRef = native.languageModelSessionStreamResponse(
         this.ptr,
         composedPrompt,
         optionsJSON,
       );
 
-      // Use a queue-based approach for async iteration
-      const queue: Array<{ chunk?: string; done?: boolean; error?: Error }> = [];
-      let resolveWaiting: (() => void) | null = null;
+      const queue: Array<
+        { snapshot: string } | { done: true } | { error: Error }
+      > = [];
+      let notify: (() => void) | null = null;
 
-      const callback = (
-        status: number,
-        contentPtr: Pointer | null,
-        length: number,
-        _userInfo: Pointer | null,
-      ) => {
-        if (status !== 0) {
+      const callback = (status: number, text: string | null) => {
+        if (status !== GenerationErrorCode.SUCCESS) {
           queue.push({ error: statusCodeToError(status) as Error });
-          resolveWaiting?.();
-          return;
-        }
-
-        if (contentPtr === null || contentPtr === 0) {
+        } else if (text === null) {
           queue.push({ done: true });
-          resolveWaiting?.();
-          return;
+        } else {
+          queue.push({ snapshot: text });
         }
-
-        // Read chunk - the content is the accumulated text, extract the delta
-        try {
-          const fullText = Buffer.from(
-            (contentPtr as any) as ArrayBuffer,
-            0,
-            length,
-          ).toString("utf-8");
-          queue.push({ chunk: fullText });
-        } catch {
-          queue.push({ chunk: "" });
-        }
-        resolveWaiting?.();
+        notify?.();
       };
 
-      // Start iteration
-      native.FMLanguageModelSessionResponseStreamIterate(
-        streamRef,
-        null,
-        callback as unknown as Pointer,
-      );
+      // Start iteration. This calls the callback synchronously for each chunk.
+      native.languageModelSessionResponseStreamIterate(streamRef, callback);
 
-      // Yield chunks
-      let lastLength = 0;
       while (true) {
         if (queue.length === 0) {
           await new Promise<void>((resolve) => {
-            resolveWaiting = resolve;
+            notify = resolve;
           });
         }
 
         const item = queue.shift();
         if (!item) continue;
-        if (item.error) throw item.error;
-        if (item.done) break;
-        if (item.chunk !== undefined) {
-          // Emit delta (new text since last chunk)
-          const delta = item.chunk.slice(lastLength);
-          lastLength = item.chunk.length;
-          if (delta) yield delta;
-        }
+        if ("error" in item) throw item.error;
+        if ("done" in item) break;
+        yield item.snapshot;
       }
-
-      // Cleanup
-      native.FMRelease(streamRef);
     } finally {
       this._requestLock = false;
+      if (streamRef) native.fmRelease(streamRef);
+      if (composedPrompt) native.fmRelease(composedPrompt);
     }
   }
 
   /**
    * Create a session from an existing transcript.
-   *
-   * This allows resuming a previous conversation.
    */
   static fromTranscript(
     transcript: Transcript,
@@ -304,19 +283,25 @@ export class LanguageModelSession extends ManagedObject {
   ): LanguageModelSession {
     const native = getNativeBindings();
 
-    let toolsPtr: Pointer | null = null;
-    const toolCount = options?.tools?.length ?? 0;
+    const tools = options?.tools ?? [];
+    const bridgedTools = tools.map((tool) => createBridgedTool(tool));
 
-    const ptr = native.FMLanguageModelSessionCreateFromTranscript(
+    const ptr = native.languageModelSessionCreateFromTranscript(
       transcript.sessionPtr,
       options?.model?.ptr ?? null,
-      toolsPtr,
-      toolCount,
+      bridgedTools.map((t) => t.ptr),
     );
 
-    // Create instance via internal constructor bypass
+    const session = LanguageModelSession.__privateFromPtr(ptr);
+    session._tools = tools;
+    session._bridgedTools = bridgedTools;
+    return session;
+  }
+
+  /** @internal — used only by fromTranscript. */
+  private static __privateFromPtr(ptr: Pointer): LanguageModelSession {
     const session = Object.create(LanguageModelSession.prototype) as LanguageModelSession;
-    ManagedObject.call(session, ptr);
+    (ManagedObject as any).call(session, ptr);
     return session;
   }
 }

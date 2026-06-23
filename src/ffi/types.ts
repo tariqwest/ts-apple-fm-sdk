@@ -5,8 +5,8 @@
  * declared in FoundationModels.h.
  */
 
-// --- Opaque pointer types (represented as `number` in Bun FFI / bigint in some runtimes) ---
-export type Pointer = number;
+// --- Opaque pointer types ---
+export type Pointer = number & { __pointer__: null };
 export type FMTaskRef = Pointer;
 export type FMSystemLanguageModelRef = Pointer;
 export type FMLanguageModelSessionRef = Pointer;

@@ -4,7 +4,7 @@
  * Mirrors the Python test schemas in tester_schemas/schemas.py.
  */
 
-import { z } from "zod";
+import z from "zod";
 import { guide } from "../../src/generation-guide.js";
 import { generable } from "../../src/generable.js";
 
