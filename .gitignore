@@ -1,0 +1,6 @@
+node_modules/
+dist/
+build/
+*.dylib
+.DS_Store
+*.tsbuildinfo

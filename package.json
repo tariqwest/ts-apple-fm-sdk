@@ -1,0 +1,64 @@
+{
+  "name": "apple-fm-sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for Apple's on-device Foundation Models (SystemLanguageModel)",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "build/*.dylib",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "build:native": "./build.sh",
+    "build:all": "bun run build:native && bun run build",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run --testPathPattern='tests/(?!integration)'",
+    "clean": "rm -rf dist",
+    "clean:all": "rm -rf dist build"
+  },
+  "keywords": [
+    "apple",
+    "apple-intelligence",
+    "foundation-models",
+    "on-device",
+    "ai",
+    "language-model",
+    "macos",
+    "ffi",
+    "typescript"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "dependencies": {
+    "zod": "^3.25.67",
+    "zod-to-json-schema": "^3.24.5"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.3"
+  }
+}
