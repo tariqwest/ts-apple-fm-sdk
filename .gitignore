@@ -8,11 +8,8 @@ build/
 # Rust N-API build artifacts
 native/target/
 
-# Reference codebases (cloned externally; do not commit their .git/.build/build)
-reference/*/.git/
-reference/*/.build/
-reference/*/.spm-build/
-reference/*/build/
+# Reference codebases (cloned externally)
+reference/
 
 # Devin handoff documents
 .agents/handoffs/
